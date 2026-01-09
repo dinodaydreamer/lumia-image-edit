@@ -1,0 +1,7 @@
+{
+  "name": "Lumina AI Photo Studio",
+  "description": "A professional image editing and generation platform powered by Gemini AI, featuring advanced restoration, retouching, and style transformation.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}
