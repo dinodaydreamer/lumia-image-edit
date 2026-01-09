@@ -5,10 +5,10 @@ import { AspectRatio, ImageSize } from "../types";
 export class GeminiImageService {
   /**
    * Generates a new image based on a text prompt.
-   * Creates a new GoogleGenAI instance for each call to ensure the latest API key is used.
+   * @param apiKey The API Key provided by the user manually.
    */
-  static async generateImage(prompt: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  static async generateImage(apiKey: string, prompt: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
       contents: {
@@ -32,9 +32,10 @@ export class GeminiImageService {
 
   /**
    * Edits an existing image based on a text prompt.
+   * @param apiKey The API Key provided by the user manually.
    */
-  static async editImage(base64Image: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  static async editImage(apiKey: string, base64Image: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     const cleanBase64 = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
 
     const response = await ai.models.generateContent({
@@ -74,9 +75,10 @@ export class GeminiImageService {
 
   /**
    * Inpaints an image using a mask and a text prompt.
+   * @param apiKey The API Key provided by the user manually.
    */
-  static async inpaintImage(base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  static async inpaintImage(apiKey: string, base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     const cleanImage = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
     const cleanMask = base64Mask.includes('base64,') ? base64Mask.split('base64,')[1] : base64Mask;
 

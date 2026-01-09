@@ -19,7 +19,7 @@ import {
   Paintbrush,
   RotateCcw,
   ChevronRight,
-  Key // Added missing Key import
+  Key
 } from 'lucide-react';
 import { AppTab, ImageFile, ProcessLog, AspectRatio, ImageSize } from './types';
 import { PRESETS } from './constants';
@@ -37,22 +37,13 @@ const App: React.FC = () => {
   const [ratio, setRatio] = useState<AspectRatio>("1:1");
   const [size, setSize] = useState<ImageSize>("1K");
   
-  // API Key selection state following mandatory guidelines
-  const [hasApiKey, setHasApiKey] = useState<boolean>(false);
+  // API Key Manual Input & Storage
+  const [manualApiKey, setManualApiKey] = useState<string>(localStorage.getItem('LUMINA_CUSTOM_KEY') || '');
 
-  // Check for API key on mount using the mandatory aistudio global
-  useEffect(() => {
-    const checkKey = async () => {
-      const has = await (window as any).aistudio.hasSelectedApiKey();
-      setHasApiKey(has);
-    };
-    checkKey();
-  }, []);
-
-  const handleOpenSelectKey = async () => {
-    await (window as any).aistudio.openSelectKey();
-    // Assume success as per guidelines to avoid race condition
-    setHasApiKey(true);
+  const handleKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setManualApiKey(val);
+    localStorage.setItem('LUMINA_CUSTOM_KEY', val);
   };
 
   // Inpaint State
@@ -155,10 +146,8 @@ const App: React.FC = () => {
   };
 
   const handleProcess = async (customPrompt?: string) => {
-    // Check key status before processing
-    if (!hasApiKey) {
-      addLog("Lỗi: Bạn chưa chọn API Key. Hãy nhấn nút ở thanh trạng thái để chọn.", 'error');
-      await handleOpenSelectKey();
+    if (!manualApiKey) {
+      addLog("Lỗi: Bạn chưa dán API Key vào ô nhập ở thanh menu.", 'error');
       return;
     }
 
@@ -185,14 +174,14 @@ const App: React.FC = () => {
       const selectedImg = images.find(img => img.id === selectedImageId);
 
       if (activeTab === AppTab.GENERATE) {
-        result = await GeminiImageService.generateImage(activePrompt, ratio, size);
+        result = await GeminiImageService.generateImage(manualApiKey, activePrompt, ratio, size);
       } else if (activeTab === AppTab.INPAINT && selectedImg) {
         const maskCanvas = maskCanvasRef.current;
         if (!maskCanvas) throw new Error("Không tìm thấy Canvas mặt nạ");
         const maskBase64 = maskCanvas.toDataURL('image/png');
-        result = await GeminiImageService.inpaintImage(selectedImg.base64, maskBase64, activePrompt, selectedImg.type, ratio, size);
+        result = await GeminiImageService.inpaintImage(manualApiKey, selectedImg.base64, maskBase64, activePrompt, selectedImg.type, ratio, size);
       } else if (selectedImg) {
-        result = await GeminiImageService.editImage(selectedImg.base64, activePrompt, selectedImg.type, ratio, size);
+        result = await GeminiImageService.editImage(manualApiKey, selectedImg.base64, activePrompt, selectedImg.type, ratio, size);
       }
 
       setResultImage(result);
@@ -209,14 +198,7 @@ const App: React.FC = () => {
       setImages(prev => [newImage, ...prev]);
       addLog("Xử lý thành công!", 'success');
     } catch (error: any) {
-      // Handle the specific error per guidelines to reset key state
-      if (error.message?.includes("Requested entity was not found.")) {
-        setHasApiKey(false);
-        addLog("API Key không hợp lệ hoặc dự án không có quyền truy cập. Vui lòng chọn lại.", 'error');
-        await handleOpenSelectKey();
-      } else {
-        addLog(error.message || "Lỗi xử lý. Kiểm tra lại kết nối.", 'error');
-      }
+      addLog(error.message || "Lỗi xử lý. Vui lòng kiểm tra lại API Key.", 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -268,7 +250,7 @@ const App: React.FC = () => {
         </div>
 
         {/* Navigation Tabs */}
-        <nav className="hidden md:flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800">
+        <nav className="hidden lg:flex items-center gap-1 bg-zinc-900/50 p-1 rounded-xl border border-zinc-800">
           {[
             { id: AppTab.GENERATE, label: 'Tạo ảnh', icon: Wand2 },
             { id: AppTab.RETOUCH, label: 'Sửa ảnh', icon: Sparkles },
@@ -276,7 +258,6 @@ const App: React.FC = () => {
             { id: AppTab.BACKGROUND, label: 'Phông nền', icon: Mountain },
             { id: AppTab.STYLE, label: 'Style', icon: Layers },
             { id: AppTab.PRESETS, label: 'Trang phục', icon: Shirt },
-            { id: AppTab.UTILITIES, label: 'Tiện ích', icon: ChevronRight },
           ].map((item) => (
             <button
               key={item.id}
@@ -293,17 +274,23 @@ const App: React.FC = () => {
           ))}
         </nav>
 
-        {/* API Key Selection UI following mandatory guidelines */}
+        {/* Manual API Key Input - Capsule UI */}
         <div className="flex items-center gap-3">
-          <button 
-            onClick={handleOpenSelectKey}
-            className={`h-10 px-4 rounded-full border border-zinc-800/50 bg-[#0c0c0e] flex items-center gap-3 transition-all min-w-[150px] ${hasApiKey ? 'shadow-[0_0_15px_-5px_rgba(34,197,94,0.3)] border-green-900/50' : 'hover:border-orange-500/50'}`}
-          >
-            <div className={`w-2.5 h-2.5 rounded-full ${hasApiKey ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.8)]' : 'bg-orange-500 animate-pulse'}`}></div>
-            <span className={`text-[10px] font-black tracking-widest uppercase transition-colors ${hasApiKey ? 'text-blue-200 opacity-60' : 'text-zinc-400'}`}>
-              {hasApiKey ? 'API READY' : 'SELECT API KEY'}
-            </span>
-          </button>
+          <div className="relative group">
+            <div className={`h-10 px-4 rounded-full border border-zinc-800/50 bg-[#0c0c0e] flex items-center gap-3 transition-all min-w-[240px] ${manualApiKey ? 'shadow-[0_0_15px_-5px_rgba(34,197,94,0.3)] border-green-900/40' : 'hover:border-zinc-700'}`}>
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 ${manualApiKey ? 'bg-[#22c55e] shadow-[0_0_8px_rgba(34,197,94,0.8)]' : 'bg-zinc-700 animate-pulse'}`}></div>
+              <input 
+                type="password"
+                placeholder=".................................."
+                value={manualApiKey}
+                onChange={handleKeyChange}
+                className="bg-transparent border-none outline-none text-[10px] text-zinc-400 font-mono tracking-[0.2em] flex-1 w-full placeholder:text-zinc-800"
+              />
+              <span className={`text-[10px] font-black tracking-widest uppercase transition-colors shrink-0 ${manualApiKey ? 'text-[#3d4957]' : 'text-zinc-800'}`}>
+                {manualApiKey ? 'READY' : 'OFF'}
+              </span>
+            </div>
+          </div>
 
           <button onClick={() => setShowGuide(true)} className="p-2.5 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-orange-500 transition-all">
             <HelpCircle size={18} />
@@ -379,13 +366,13 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {!hasApiKey && (
+            {!manualApiKey && (
                <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/50 backdrop-blur-sm rounded-3xl p-10 text-center">
-                  <div className="max-w-md bg-zinc-900 border border-zinc-800 p-10 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-6">
+                  <div className="max-w-sm bg-zinc-900 border border-zinc-800 p-10 rounded-[2.5rem] shadow-2xl flex flex-col items-center gap-6">
                     <Key className="w-12 h-12 text-orange-600 opacity-50" />
-                    <h3 className="text-lg font-black uppercase italic">Sẵn sàng trải nghiệm?</h3>
-                    <p className="text-xs text-zinc-500 leading-relaxed">Để sử dụng Lumina Pro, bạn cần chọn một <b>API Key</b> từ dự án GCP có tính phí. Xem thêm về <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-orange-500 underline">tài liệu thanh toán</a>.</p>
-                    <button onClick={handleOpenSelectKey} className="px-8 py-4 bg-orange-600 hover:bg-orange-500 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-lg shadow-orange-950/20">CHỌN API KEY CỦA BẠN</button>
+                    <h3 className="text-lg font-black uppercase italic">Thiếu thông tin</h3>
+                    <p className="text-xs text-zinc-500 leading-relaxed">Vui lòng dán <b>Gemini API Key</b> vào ô nhập ở thanh menu phía trên để bắt đầu sử dụng Lumina Pro.</p>
+                    <button onClick={() => {}} className="px-8 py-3 bg-zinc-800 hover:bg-zinc-700 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all">Tôi đã hiểu</button>
                   </div>
                </div>
             )}
@@ -564,16 +551,16 @@ const App: React.FC = () => {
                 </div>
                 <div className="p-10 grid md:grid-cols-2 gap-10 text-xs leading-relaxed">
                     <div className="space-y-4">
-                        <p className="font-black text-orange-500 uppercase flex items-center gap-2">1. Chọn API Key</p>
-                        <p className="text-zinc-500">Nhấn vào nút <b>SELECT API KEY</b> ở thanh trạng thái. Bạn cần chọn một dự án GCP có bật tính phí để sử dụng mô hình Gemini 3 Pro Image.</p>
+                        <p className="font-black text-orange-500 uppercase flex items-center gap-2">1. Nhập API Key</p>
+                        <p className="text-zinc-500">Dán <b>Gemini API Key</b> của bạn vào ô textbox capsule trên thanh menu. Key sẽ được lưu lại (READY) cho các lần sử dụng sau.</p>
                         <p className="font-black text-orange-500 uppercase flex items-center gap-2">2. Vẽ vùng Mask</p>
-                        <p className="text-zinc-500">Tại tab "Vẽ Mask", bôi trắng vùng bạn muốn thay đổi (vd: bôi vùng áo để thay quần áo). AI sẽ chỉ vẽ lại đúng phần đó.</p>
+                        <p className="text-zinc-500">Tại tab "Vẽ Mask", bôi trắng vùng bạn muốn thay đổi. AI sẽ chỉ tác động lên phần đó.</p>
                     </div>
                     <div className="space-y-4">
                         <p className="font-black text-orange-500 uppercase flex items-center gap-2">3. Sử dụng Preset</p>
                         <p className="text-zinc-500">Bộ công cụ bên phải cung cấp các cài đặt sẵn cho: phục hồi ảnh cũ, làm ảnh thờ Nam/Nữ, ảnh thẻ các màu nền.</p>
                         <p className="font-black text-orange-500 uppercase flex items-center gap-2">4. Xuất & Lưu</p>
-                        <p className="text-zinc-500">Sau khi có kết quả, nhấn <b>ÁP DỤNG</b> để tiếp tục chỉnh sửa trên ảnh mới hoặc nhấn Download để lưu về máy.</p>
+                        <p className="text-zinc-500">Sau khi hoàn tất, bạn có thể tải ảnh về hoặc tiếp tục chỉnh sửa trên kết quả vừa tạo ra.</p>
                     </div>
                 </div>
                 <div className="p-10 bg-zinc-950 flex justify-center">
