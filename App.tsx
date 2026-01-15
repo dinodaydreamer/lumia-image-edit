@@ -22,7 +22,8 @@ import {
   ShieldCheck,
   MousePointer2,
   Images,
-  ExternalLink
+  ExternalLink,
+  ShieldAlert
 } from 'lucide-react';
 import { AppTab, ImageFile, ProcessLog, AspectRatio, ImageSize } from './types';
 import { PRESETS } from './constants';
@@ -42,21 +43,13 @@ const App: React.FC = () => {
   const [ratio, setRatio] = useState<AspectRatio>("1:1");
   const [size, setSize] = useState<ImageSize>("1K");
   
-  // Trạng thái API Key theo hướng dẫn Gemini 3 / Veo
-  const [hasKey, setHasKey] = useState(false);
+  // Manual API Key State
+  const [manualApiKey, setManualApiKey] = useState<string>(localStorage.getItem('LUMINA_MANUAL_KEY') || '');
 
-  useEffect(() => {
-    const checkKey = async () => {
-      const selected = await (window as any).aistudio.hasSelectedApiKey();
-      setHasKey(selected);
-    };
-    checkKey();
-  }, []);
-
-  const handleOpenKey = async () => {
-    await (window as any).aistudio.openSelectKey();
-    // Race condition: giả định thành công theo hướng dẫn
-    setHasKey(true);
+  const handleKeyChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const val = e.target.value;
+    setManualApiKey(val);
+    localStorage.setItem('LUMINA_MANUAL_KEY', val);
   };
 
   const [brushSize, setBrushSize] = useState(30);
@@ -64,7 +57,6 @@ const App: React.FC = () => {
   const [isDrawing, setIsDrawing] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // --- HÀM VẼ MASK CHO INPAINT ---
   const getCoordinates = (e: React.MouseEvent | React.TouchEvent, canvas: HTMLCanvasElement) => {
     const rect = canvas.getBoundingClientRect();
     let clientX, clientY;
@@ -177,60 +169,35 @@ const App: React.FC = () => {
   };
 
   const handleProcess = async (customPrompt?: string) => {
-    const isKeySelected = await (window as any).aistudio.hasSelectedApiKey();
-    if (!isKeySelected) {
-      addLog("Lỗi: Thiếu API Key. Vui lòng kết nối với Google AI Studio.", 'error');
-      await handleOpenKey();
+    if (!manualApiKey) {
+      addLog("Lỗi: Bạn chưa nhập API Key vào ô textbox trên menu.", 'error');
       return;
     }
 
     const activePrompt = customPrompt || prompt;
     const selectedRefs = images.filter(img => referenceIds.includes(img.id));
 
-    if (activeTab === AppTab.INPAINT) {
-        if (!selectedImageId) return addLog("Chọn ảnh gốc để Inpaint", 'error');
-        setIsProcessing(true);
-        try {
-            const selectedImg = images.find(img => img.id === selectedImageId)!;
-            const maskBase64 = maskCanvasRef.current?.toDataURL('image/png') || '';
-            const res = await GeminiImageService.inpaintImage(selectedImg.base64, maskBase64, activePrompt, selectedImg.type, ratio, size);
-            setResultImage(res);
-            addNewImageToLibrary(res);
-        } catch (e: any) {
-            if (e.message?.includes("Requested entity was not found.")) {
-               setHasKey(false);
-               addLog("API Key không hợp lệ hoặc thiếu Billing. Vui lòng chọn lại.", 'error');
-               await handleOpenKey();
-            } else {
-               addLog(e.message, 'error');
-            }
-        } finally { setIsProcessing(false); }
-        return;
-    }
-
-    if (selectedRefs.length === 0 && activeTab !== AppTab.GENERATE) {
-      addLog("Vui lòng chọn ít nhất 1 ảnh làm tham chiếu.", 'error');
-      return;
-    }
-
     setIsProcessing(true);
     setResultImage(null);
-    addLog(`Đang tổng hợp dữ liệu từ ${selectedRefs.length} ảnh...`, 'info');
 
     try {
-      const refPayload = selectedRefs.map(img => ({ base64: img.base64, mimeType: img.type }));
-      const result = await GeminiImageService.processWithReferences(activePrompt, refPayload, ratio, size);
-      setResultImage(result);
-      addNewImageToLibrary(result);
+      if (activeTab === AppTab.INPAINT) {
+          if (!selectedImageId) throw new Error("Vui lòng chọn ảnh gốc để Inpaint.");
+          const selectedImg = images.find(img => img.id === selectedImageId)!;
+          const maskBase64 = maskCanvasRef.current?.toDataURL('image/png') || '';
+          const res = await GeminiImageService.inpaintImage(manualApiKey, selectedImg.base64, maskBase64, activePrompt, selectedImg.type, ratio, size);
+          setResultImage(res);
+          addNewImageToLibrary(res);
+      } else {
+          if (selectedRefs.length === 0 && activeTab !== AppTab.GENERATE) throw new Error("Vui lòng chọn ít nhất 1 ảnh làm tham chiếu.");
+          const refPayload = selectedRefs.map(img => ({ base64: img.base64, mimeType: img.type }));
+          const result = await GeminiImageService.processWithReferences(manualApiKey, activePrompt, refPayload, ratio, size);
+          setResultImage(result);
+          addNewImageToLibrary(result);
+      }
       addLog("Xử lý thành công!", 'success');
     } catch (error: any) {
-      if (error.message?.includes("Requested entity was not found.")) {
-        setHasKey(false);
-        addLog("API Key không hợp lệ hoặc thiếu Billing. Vui lòng chọn lại.", 'error');
-        await handleOpenKey();
-      } else {
-        addLog(error.message, 'error');
-      }
+      addLog(error.message, 'error');
     } finally {
       setIsProcessing(false);
     }
@@ -331,16 +298,23 @@ const App: React.FC = () => {
           ))}
         </nav>
 
+        {/* API KEY CAPSULE TEXTBOX */}
         <div className="flex items-center gap-3">
           <div className="relative">
-            <button 
-              onClick={handleOpenKey}
-              className={`h-11 px-6 rounded-full border flex items-center gap-3 transition-all min-w-[200px] font-black text-[10px] uppercase tracking-widest ${hasKey ? 'bg-zinc-900 border-green-500/50 text-green-500 shadow-[0_0_20px_-5px_rgba(34,197,94,0.4)]' : 'bg-orange-600 border-orange-500 text-white hover:bg-orange-500 shadow-lg shadow-orange-950/20'}`}
-            >
-              <Key size={14} />
-              <span>{hasKey ? 'ĐÃ KẾT NỐI CLOUD' : 'KẾT NỐI API KEY'}</span>
-              <div className={`w-2 h-2 rounded-full ${hasKey ? 'bg-green-500 shadow-[0_0_8px_rgba(34,197,94,1)]' : 'bg-white/50 animate-pulse'}`}></div>
-            </button>
+            <div className={`h-11 px-5 rounded-full border border-zinc-800 bg-[#0c0c0e] flex items-center gap-3 transition-all min-w-[280px] group ${manualApiKey ? 'border-green-500/50 shadow-[0_0_20px_-5px_rgba(34,197,94,0.4)]' : 'hover:border-zinc-700'}`}>
+              <Key size={14} className={`shrink-0 transition-colors ${manualApiKey ? 'text-green-500' : 'text-zinc-600'}`} />
+              <input 
+                type="password"
+                placeholder="NHẬP GEMINI API KEY..."
+                value={manualApiKey}
+                onChange={handleKeyChange}
+                className="bg-transparent border-none outline-none text-[10px] text-zinc-300 font-mono tracking-[0.1em] flex-1 w-full placeholder:text-zinc-800 uppercase"
+              />
+              <div className={`w-2.5 h-2.5 rounded-full shrink-0 transition-all ${manualApiKey ? 'bg-[#22c55e] shadow-[0_0_10px_rgba(34,197,94,1)]' : 'bg-orange-600 animate-pulse shadow-[0_0_8px_rgba(234,88,12,0.5)]'}`}></div>
+              <span className={`text-[8px] font-black tracking-widest uppercase transition-colors shrink-0 ${manualApiKey ? 'text-green-500' : 'text-orange-500'}`}>
+                {manualApiKey ? 'READY' : 'REQUIRED'}
+              </span>
+            </div>
           </div>
 
           <button onClick={() => setShowGuide(true)} className="p-3 rounded-full bg-zinc-900 border border-zinc-800 text-zinc-400 hover:text-orange-500 transition-all shadow-xl">
@@ -429,7 +403,7 @@ const App: React.FC = () => {
                 </div>
             )}
 
-            {!hasKey && (
+            {!manualApiKey && (
                <div className="absolute inset-0 z-40 flex items-center justify-center bg-black/60 backdrop-blur-md rounded-3xl p-10 text-center">
                   <div className="max-w-md bg-zinc-900 border border-zinc-800 p-12 rounded-[3.5rem] shadow-2xl flex flex-col items-center gap-8">
                     <div className="w-20 h-20 bg-zinc-950 rounded-full flex items-center justify-center border border-zinc-800 shadow-inner">
@@ -437,17 +411,11 @@ const App: React.FC = () => {
                     </div>
                     <div className="space-y-3">
                         <h3 className="text-xl font-black uppercase italic tracking-tight">Kích hoạt Lumina Pro</h3>
-                        <p className="text-xs text-zinc-500 leading-relaxed font-medium italic">Bạn cần kết nối API Key từ một dự án Google Cloud <b>đã bật Billing</b> để sử dụng các mô hình Gemini 3 cao cấp.</p>
-                        <a href="https://ai.google.dev/gemini-api/docs/billing" target="_blank" rel="noreferrer" className="text-[10px] text-orange-500 font-black uppercase flex items-center justify-center gap-1 hover:underline">
-                          TÀI LIỆU BILLING <ExternalLink size={10} />
+                        <p className="text-xs text-zinc-500 leading-relaxed font-medium italic">Vui lòng nhập <b>Gemini API Key</b> vào ô Textbox phía trên menu để bắt đầu sử dụng.</p>
+                        <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-[10px] text-orange-500 font-black uppercase flex items-center justify-center gap-1 hover:underline">
+                          LẤY API KEY TẠI ĐÂY <ExternalLink size={10} />
                         </a>
                     </div>
-                    <button 
-                      onClick={handleOpenKey}
-                      className="px-12 py-4 bg-orange-600 hover:bg-orange-500 rounded-2xl text-[10px] font-black uppercase tracking-widest transition-all shadow-xl shadow-orange-950/20"
-                    >
-                      KẾT NỐI NGAY
-                    </button>
                   </div>
                </div>
             )}
@@ -500,7 +468,6 @@ const App: React.FC = () => {
             ) : (
               <div className="w-full h-full flex flex-col items-center justify-center max-w-4xl p-4 gap-8">
                   <div className="w-full grid lg:grid-cols-2 gap-8 items-center">
-                    {/* Input References Visualization */}
                     <div className="flex flex-col gap-4">
                       <div className="flex items-center justify-between px-2">
                         <span className="text-[10px] font-black uppercase text-zinc-600 tracking-widest">Dữ liệu tham chiếu</span>
@@ -530,7 +497,6 @@ const App: React.FC = () => {
                       </div>
                     </div>
                     
-                    {/* Result Output */}
                     <div className="flex flex-col gap-4">
                       <span className="text-[10px] font-black uppercase tracking-widest text-orange-500 px-3 py-1 bg-orange-500/10 rounded-full w-fit flex items-center gap-2 self-end"><Sparkles size={10} /> Kết quả sáng tạo</span>
                       <div className={`w-full bg-zinc-950 rounded-[2.5rem] border border-zinc-800 shadow-2xl overflow-hidden flex items-center justify-center group relative transition-all duration-500 min-h-[300px] ${getRatioClass(ratio)}`}>
@@ -631,22 +597,22 @@ const App: React.FC = () => {
                 <div className="p-12 grid md:grid-cols-2 gap-12 text-[11px] leading-relaxed font-medium">
                     <div className="space-y-6">
                         <div className="space-y-2">
-                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">1. Tham chiếu Đa Ảnh</p>
-                            <p className="text-zinc-500 italic">Kéo thả 1 hoặc NHIỀU ảnh vào màn hình. AI sẽ phân tích phong cách, nhân vật từ tất cả các ảnh đó để tạo ra kết quả tổng hợp.</p>
+                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">1. Nhập API Key</p>
+                            <p className="text-zinc-500 italic">Dán khóa Gemini API vào ô Capsule phía trên Header. Đèn xanh bật là bạn đã sẵn sàng.</p>
                         </div>
                         <div className="space-y-2">
-                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">2. Vẽ Mask & Inpaint</p>
-                            <p className="text-zinc-500 italic">Chọn 1 ảnh gốc, dùng cọ bôi vùng cần thay đổi. AI sẽ chỉ tác động lên vùng mask bạn đã vẽ.</p>
+                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">2. Tham chiếu Đa Ảnh</p>
+                            <p className="text-zinc-500 italic">Kéo thả nhiều ảnh vào. AI sẽ học hỏi phong cách từ tất cả chúng.</p>
                         </div>
                     </div>
                     <div className="space-y-6">
                         <div className="space-y-2">
                             <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">3. Ảnh Thờ Chuyên Nghiệp</p>
-                            <p className="text-zinc-500 italic">Dùng preset "Ảnh Thờ" để tự động crop chân dung cận cảnh, phông nền Dark Blue trang nghiêm cho Nam/Nữ.</p>
+                            <p className="text-zinc-500 italic">Sử dụng preset Ảnh Thờ: tự động Crop cận cảnh chân dung và áp nền Dark Blue trang nghiêm.</p>
                         </div>
                         <div className="space-y-2">
-                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">4. 10+ Style Nghệ Thuật</p>
-                            <p className="text-zinc-500 italic">Khám phá các phong cách: Sơn dầu, Than chì, Pixel Art, Gothic... để biến đổi ảnh tham chiếu thành tác phẩm nghệ thuật.</p>
+                            <p className="font-black text-orange-500 uppercase flex items-center gap-2 tracking-widest">4. Chế độ Vẽ Mask</p>
+                            <p className="text-zinc-500 italic">Dùng cọ tô vùng cần thay đổi. AI sẽ chỉ tác động lên phần bạn đã vẽ.</p>
                         </div>
                     </div>
                 </div>

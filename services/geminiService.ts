@@ -7,15 +7,14 @@ export class GeminiImageService {
    * Tạo hoặc chỉnh sửa ảnh sử dụng 1 hoặc nhiều ảnh tham chiếu.
    */
   static async processWithReferences(
+    apiKey: string,
     prompt: string, 
     referenceImages: { base64: string, mimeType: string }[], 
     aspectRatio: AspectRatio = "1:1", 
     imageSize: ImageSize = "1K"
   ) {
-    // Luôn tạo instance mới ngay trước khi gọi để đảm bảo key mới nhất từ user selection
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     
-    // Tạo các part hình ảnh từ danh sách tham chiếu
     const imageParts = referenceImages.map(img => {
       const cleanBase64 = img.base64.includes('base64,') ? img.base64.split('base64,')[1] : img.base64;
       return {
@@ -26,7 +25,6 @@ export class GeminiImageService {
       };
     });
 
-    // Tạo chỉ dẫn nâng cao nếu có nhiều ảnh
     const enhancedPrompt = imageParts.length > 1 
       ? `Dựa trên ${imageParts.length} hình ảnh tham chiếu đi kèm, hãy kết hợp các đặc điểm (phong cách, đối tượng, màu sắc) và thực hiện yêu cầu sau: ${prompt}`
       : prompt;
@@ -56,9 +54,8 @@ export class GeminiImageService {
     throw new Error("Không thể tạo kết quả từ các ảnh tham chiếu này.");
   }
 
-  static async inpaintImage(base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    // Luôn tạo instance mới ngay trước khi gọi để đảm bảo key mới nhất từ user selection
-    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+  static async inpaintImage(apiKey: string, base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
+    const ai = new GoogleGenAI({ apiKey: apiKey });
     const cleanImage = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
     const cleanMask = base64Mask.includes('base64,') ? base64Mask.split('base64,')[1] : base64Mask;
 
