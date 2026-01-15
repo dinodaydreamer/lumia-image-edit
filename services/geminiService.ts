@@ -4,15 +4,37 @@ import { AspectRatio, ImageSize } from "../types";
 
 export class GeminiImageService {
   /**
-   * Generates a new image based on a text prompt.
-   * @param apiKey The API Key provided by the user manually.
+   * Tạo hoặc chỉnh sửa ảnh sử dụng 1 hoặc nhiều ảnh tham chiếu.
    */
-  static async generateImage(apiKey: string, prompt: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: apiKey });
+  static async processWithReferences(
+    prompt: string, 
+    referenceImages: { base64: string, mimeType: string }[], 
+    aspectRatio: AspectRatio = "1:1", 
+    imageSize: ImageSize = "1K"
+  ) {
+    // Luôn tạo instance mới ngay trước khi gọi để đảm bảo key mới nhất từ user selection
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
+    
+    // Tạo các part hình ảnh từ danh sách tham chiếu
+    const imageParts = referenceImages.map(img => {
+      const cleanBase64 = img.base64.includes('base64,') ? img.base64.split('base64,')[1] : img.base64;
+      return {
+        inlineData: {
+          data: cleanBase64,
+          mimeType: img.mimeType || 'image/png',
+        },
+      };
+    });
+
+    // Tạo chỉ dẫn nâng cao nếu có nhiều ảnh
+    const enhancedPrompt = imageParts.length > 1 
+      ? `Dựa trên ${imageParts.length} hình ảnh tham chiếu đi kèm, hãy kết hợp các đặc điểm (phong cách, đối tượng, màu sắc) và thực hiện yêu cầu sau: ${prompt}`
+      : prompt;
+
     const response = await ai.models.generateContent({
       model: 'gemini-3-pro-image-preview',
       contents: {
-        parts: [{ text: prompt }],
+        parts: [...imageParts, { text: enhancedPrompt }],
       },
       config: {
         imageConfig: {
@@ -27,58 +49,16 @@ export class GeminiImageService {
         return `data:image/png;base64,${part.inlineData.data}`;
       }
     }
-    throw new Error("Không thể tạo ảnh. Vui lòng thử lại.");
-  }
-
-  /**
-   * Edits an existing image based on a text prompt.
-   * @param apiKey The API Key provided by the user manually.
-   */
-  static async editImage(apiKey: string, base64Image: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: apiKey });
-    const cleanBase64 = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
-
-    const response = await ai.models.generateContent({
-      model: 'gemini-3-pro-image-preview',
-      contents: {
-        parts: [
-          {
-            inlineData: {
-              data: cleanBase64,
-              mimeType: mimeType || 'image/png',
-            },
-          },
-          { text: prompt },
-        ],
-      },
-      config: {
-        imageConfig: {
-          aspectRatio,
-          imageSize
-        }
-      }
-    });
-
-    for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
-    }
     
     const textPart = response.candidates?.[0]?.content?.parts.find(p => p.text);
-    if (textPart) {
-        throw new Error(`AI phản hồi: ${textPart.text}`);
-    }
+    if (textPart) throw new Error(`AI: ${textPart.text}`);
 
-    throw new Error("Không thể chỉnh sửa ảnh. AI không trả về kết quả hình ảnh.");
+    throw new Error("Không thể tạo kết quả từ các ảnh tham chiếu này.");
   }
 
-  /**
-   * Inpaints an image using a mask and a text prompt.
-   * @param apiKey The API Key provided by the user manually.
-   */
-  static async inpaintImage(apiKey: string, base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
-    const ai = new GoogleGenAI({ apiKey: apiKey });
+  static async inpaintImage(base64Image: string, base64Mask: string, prompt: string, mimeType: string, aspectRatio: AspectRatio = "1:1", imageSize: ImageSize = "1K") {
+    // Luôn tạo instance mới ngay trước khi gọi để đảm bảo key mới nhất từ user selection
+    const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
     const cleanImage = base64Image.includes('base64,') ? base64Image.split('base64,')[1] : base64Image;
     const cleanMask = base64Mask.includes('base64,') ? base64Mask.split('base64,')[1] : base64Mask;
 
@@ -86,38 +66,19 @@ export class GeminiImageService {
       model: 'gemini-3-pro-image-preview',
       contents: {
         parts: [
-          {
-            inlineData: {
-              data: cleanImage,
-              mimeType: mimeType || 'image/png',
-            },
-          },
-          {
-            inlineData: {
-              data: cleanMask,
-              mimeType: 'image/png',
-            },
-          },
-          { text: `Sử dụng mặt nạ (mask) đi kèm, hãy thay đổi vùng màu trắng trong mặt nạ bằng: ${prompt}. Giữ nguyên các phần còn lại của ảnh gốc.` },
+          { inlineData: { data: cleanImage, mimeType: mimeType || 'image/png' } },
+          { inlineData: { data: cleanMask, mimeType: 'image/png' } },
+          { text: `Dựa trên mặt nạ mask, hãy thay thế vùng trắng bằng: ${prompt}.` },
         ],
       },
       config: {
-        imageConfig: {
-          aspectRatio,
-          imageSize
-        }
+        imageConfig: { aspectRatio, imageSize }
       }
     });
 
     for (const part of response.candidates?.[0]?.content?.parts || []) {
-      if (part.inlineData) {
-        return `data:image/png;base64,${part.inlineData.data}`;
-      }
+      if (part.inlineData) return `data:image/png;base64,${part.inlineData.data}`;
     }
-
-    const textPart = response.candidates?.[0]?.content?.parts.find(p => p.text);
-    if (textPart) throw new Error(textPart.text);
-
-    throw new Error("Không thể thực hiện inpaint. Vui lòng thử lại.");
+    throw new Error("Inpaint thất bại.");
   }
 }
